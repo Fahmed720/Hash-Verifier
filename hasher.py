@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 File Hash Verifier - Cybersecurity Portfolio Project
-Author: [Your Name]
+Author: Fahim Ahmed
 Description: Computes and verifies cryptographic hashes (MD5, SHA1, SHA256,
              SHA512) for files. Useful for integrity checking, download
              verification, and basic digital forensics.
