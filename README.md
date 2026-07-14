@@ -1,66 +1,68 @@
-# Log Analyser
+# File Hash Verifier
 
-A Python tool that parses Apache/Nginx access logs and SSH auth logs to automatically detect suspicious activity patterns. Outputs findings as a clean HTML dashboard or plain-text report.
+A command-line tool for computing and verifying cryptographic file hashes. Supports MD5, SHA1, SHA256, and SHA512. Useful for checking download integrity, detecting file tampering, and building basic forensic workflows.
 
-Built as part of a cybersecurity portfolio to demonstrate knowledge of threat detection, log analysis, SIEM concepts, and the OWASP Top 10.
+Built as part of a cybersecurity portfolio to demonstrate knowledge of cryptographic hashing, file integrity checking, and the role of checksums in security.
 
 ---
 
-## Detection capabilities
+## Features
 
-| Finding type | Log source | Severity | What it detects |
-|---|---|---|---|
-| SSH Brute Force | auth.log | HIGH | N failed SSH logins from one IP within a time window |
-| Web Auth Brute Force | access.log | HIGH | N HTTP 401/403 responses from one IP |
-| SQL Injection | access.log | HIGH | SQLi payloads in request paths and parameters |
-| XSS Attempt | access.log | HIGH | Script injection patterns in URLs |
-| Path Traversal | access.log | HIGH | `../`, `/etc/passwd`, encoded traversal sequences |
-| Shell Injection | access.log | HIGH | Shell command patterns in request paths |
-| Security Scanner | access.log | MEDIUM | Known tool signatures: sqlmap, nikto, DirBuster, Nmap, Burp |
-| Directory Scanning | access.log | MEDIUM | High volume of unique path requests from one IP |
-| Traffic Spike | access.log | LOW | Requests per minute significantly above that IP's average |
-| High Error Rate | access.log | LOW | IP generating large numbers of 4xx/5xx responses |
+- Hash any file using MD5, SHA1, SHA256, or SHA512 (or all at once)
+- Verify a file against a known hash — outputs a clear MATCH / MISMATCH result
+- Build a **hash manifest** of an entire directory for baseline integrity monitoring
+- **Check a directory** against a saved manifest to detect added, changed, or missing files
+- Flags MD5 and SHA1 as weak algorithms when used in a security context
+- Reads files in chunks — works correctly on large files without memory issues
+- Optional plain-text report output
 
 ---
 
 ## Requirements
 
-- Python 3.10 or higher (uses the walrus operator `:=`)
-- No external packages required (stdlib only: `re`, `json`, `argparse`, `collections`, `datetime`)
+- Python 3.8 or higher
+- No external packages required (uses stdlib only: `hashlib`, `pathlib`, `json`, `argparse`)
 
 ---
 
 ## Usage
 
+### Hash a file
+
 ```bash
-# Analyse an Apache/Nginx access log (auto-detects format)
-python analyser.py /var/log/nginx/access.log
+# All algorithms at once
+python hasher.py hash myfile.zip
 
-# Analyse an SSH auth log
-python analyser.py /var/log/auth.log --type ssh
+# Specific algorithm
+python hasher.py hash myfile.zip --alg sha256
 
-# Choose report format
-python analyser.py access.log --format text
-python analyser.py access.log --format html
-
-# Specify output path
-python analyser.py access.log --report reports/my_report.html
-
-# Also export findings as JSON (useful for piping into other tools)
-python analyser.py access.log --json findings.json
-
-# Suppress per-finding console output (report only)
-python analyser.py access.log --quiet
+# Save a report
+python hasher.py hash myfile.zip --report reports/hash_report.txt
 ```
 
-### Try it with the included sample logs
+### Verify a file against a known hash
 
 ```bash
-# Web log with SQLi, XSS, path traversal, and scanning activity
-python analyser.py sample_logs/access.log
+python hasher.py verify ubuntu-24.04.iso --alg sha256 --expected <paste hash here>
+```
 
-# SSH log with three brute-force sources
-python analyser.py sample_logs/auth.log --type ssh
+### Build a manifest of a directory
+
+```bash
+# Hash every file in a folder
+python hasher.py manifest ./project --alg sha256 --save manifest.json
+
+# Include subdirectories
+python hasher.py manifest ./project --alg sha256 --save manifest.json -r
+```
+
+### Check a directory against a saved manifest
+
+```bash
+python hasher.py check manifest.json
+
+# Save a report of changes
+python hasher.py check manifest.json --report reports/integrity_report.txt
 ```
 
 ---
@@ -69,107 +71,79 @@ python analyser.py sample_logs/auth.log --type ssh
 
 ```
 ======================================================================
-  LOG ANALYSER  —  Suspicious Activity Detector
+  FILE HASH VERIFIER
 ======================================================================
 
-[*] Loaded 63 lines from: sample_logs/access.log
-[*] Log type: APACHE
-[*] Parsed 60 valid events.
-[*] Running detection rules...
+  File : ubuntu-24.04.iso
+  Size : 2,097,152,000 bytes
 
-  [HIGH]   XSS Attempt
-           IP     : 203.0.113.42
-           Detail : 1 request(s) with XSS Attempt payload.
-
-  [HIGH]   Path Traversal
-           IP     : 172.16.0.99
-           Detail : 4 request(s) with Path Traversal payload.
-
-  [MEDIUM] Directory Scanning
-           IP     : 198.51.100.7
-           Detail : 31 unique paths requested. Likely automated scanning.
-
-  [MEDIUM] Security Scanner Detected
-           IP     : 198.51.100.7
-           Detail : Tool identified: dirbuster. 31 request(s) made.
-
-[*] Analysis complete — 5 finding(s) (2 HIGH severity)
-[*] HTML report saved to: reports/access_report.html
+  MD5         5d41402abc4b2a76b9719d911017c592  ⚠  weak algorithm
+  SHA1        da39a3ee5e6b4b0d3255bfef95601890afd80709  ⚠  weak algorithm
+  SHA256      3b4c6d8e1f9a2b7c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7
+  SHA512      9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08...
 ```
 
-The HTML report renders a card-based dashboard with severity-colour-coded findings and a top-IPs table.
+```
+  [✓] MATCH — file integrity confirmed.
+```
+
+```
+  [✓] ubuntu.iso      (OK)
+  [✗] config.cfg      (CHANGED)
+  [?] notes.txt       (MISSING)
+
+  Summary: 1 OK  |  1 CHANGED  |  1 MISSING
+  [!] Integrity issues detected.
+```
 
 ---
 
 ## How it works
 
-1. **Auto-detection** — the tool samples the first 50 lines and scores them against Apache and SSH regex patterns to determine the log format without requiring the user to specify it
-2. **Regex parsing** — named capture groups extract structured fields (IP, timestamp, method, path, status code, user-agent) from each log line
-3. **Detection rules** — each rule is a standalone function that receives the parsed event list and returns a list of findings; this makes rules easy to add, remove, or tune independently
-4. **Sliding window** — brute-force detection uses a sliding time window rather than a fixed counter, so an attacker who spreads attempts across window boundaries is still caught
-5. **Deduplication** — the same (type, IP) pair is only reported once, even if multiple windows trigger
-6. **Report generation** — findings are written to either a self-contained HTML file or a plain-text file; JSON export allows findings to be piped into other tools or dashboards
+1. **Chunked reading** — files are read in 64 KB blocks and fed into the hash function incrementally, so even a 50 GB file is handled without loading it all into memory
+2. **hashlib** — Python's built-in cryptographic library wraps proven C implementations of each algorithm
+3. **Manifest mode** — snapshots the hash of every file in a directory to a JSON file; running `check` later re-hashes everything and compares, flagging any differences
+4. **Algorithm warnings** — MD5 and SHA1 are collision-vulnerable; the tool flags their use so the output is honest about what they can and cannot prove
 
 ---
 
 ## What I learned
 
-- How Apache/Nginx and SSH log formats are structured and how to parse them with regex named groups
-- How SIEM tools (Splunk, Elastic SIEM) work at a conceptual level — this tool replicates their core loop: ingest → parse → correlate → alert
-- The OWASP Top 10 attack patterns: SQLi, XSS, path traversal, broken authentication
-- How brute-force detection uses time-windowed thresholds rather than raw counts
-- Why log analysis is a core skill for SOC analyst, security engineer, and blue-team roles
+- How cryptographic hash functions work (deterministic, one-way, collision-resistant)
+- Why MD5 and SHA1 are considered broken for security use (collision attacks)
+- Why SHA256 is the current standard for file integrity verification
+- How chunked file reading prevents memory exhaustion on large files
+- How hash manifests are used in file integrity monitoring tools like Tripwire and AIDE
+- The difference between hashing (integrity) and encryption (confidentiality)
 
 ---
 
-## Tuning the thresholds
+## Real-world applications
 
-Edit the `THRESHOLDS` dict at the top of `analyser.py`:
-
-```python
-THRESHOLDS = {
-    "brute_force_ssh":        5,    # failed SSH logins from one IP within window
-    "brute_force_web":       20,    # HTTP 401/403 from one IP
-    "high_error_rate":       50,    # total 4xx/5xx from one IP
-    "scan_unique_paths":     30,    # unique URLs from one IP
-    "traffic_spike_factor":   3.0,  # requests > mean × factor triggers alert
-    "time_window_minutes":    5,    # rolling window for brute-force checks
-}
-```
-
-Lower values = more sensitive (more false positives). Higher values = less noise (more false negatives). This trade-off is the same one SOC teams tune in real SIEM deployments.
-
----
-
-## Real-world log sources
-
-| OS / Service | Log location |
+| Use case | How this tool helps |
 |---|---|
-| Apache | `/var/log/apache2/access.log` |
-| Nginx | `/var/log/nginx/access.log` |
-| SSH (Debian/Ubuntu) | `/var/log/auth.log` |
-| SSH (RHEL/CentOS) | `/var/log/secure` |
+| Verifying a downloaded ISO | `verify` command checks it matches the publisher's posted hash |
+| Detecting malware modification | `manifest` + `check` reveals any file that changed after a known-good baseline |
+| Digital forensics | Hash evidence files to prove they were not altered after collection |
+| Software supply chain | Hash build artefacts to detect tampering before deployment |
 
 ---
 
 ## Limitations and possible extensions
 
-- Parses one file at a time; could be extended to tail a live log with `watchdog`
-- No IP geolocation (could add with `ip-api.com` or MaxMind GeoLite2)
-- No allowlisting for known internal IPs
-- Could export to STIX/TAXII format for threat intelligence sharing
-- Could add email or Slack alerting for HIGH severity findings
+- Does not handle symbolic links (skipped silently)
+- Manifest paths are absolute — moving the directory breaks verification
+- Could be extended to watch a directory in real-time using `watchdog`
+- Could output JSON for integration with SIEM tools
+- Could add HMAC support for authenticated integrity checks
 
 ---
 
 ## Project structure
 
 ```
-log-analyser/
-├── analyser.py           — main script
-├── README.md             — this file
-├── sample_logs/
-│   ├── access.log        — sample Apache log with attack traffic
-│   └── auth.log          — sample SSH log with brute-force attempts
-└── reports/              — auto-created; stores generated reports
+hash-verifier/
+├── hasher.py       — main script
+├── README.md       — this file
+└── reports/        — auto-created; stores report output files
 ```
